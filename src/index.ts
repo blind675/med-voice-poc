@@ -18,10 +18,10 @@ const GATHER = (
     vr: twiml.VoiceResponse,
     action: string,
     prompt: string,
-    opts?: Partial<twiml.GatherAttributes>
+    opts?: Partial<Parameters<twiml.VoiceResponse["gather"]>[0]>
 ) => {
     const gather = vr.gather({
-        input: "speech",
+        input: ["speech"],
         language: "ro-RO",
         action,
         method: "POST",

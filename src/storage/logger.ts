@@ -5,7 +5,7 @@ import slugify from "slugify";
 const BASE_DIR = path.join(process.cwd(), "data", "calls");
 
 export type TurnLog = {
-    ts: string;                // ISO timestamp
+    ts?: string;               // ISO timestamp (added by appendTurn)
     state: string;             // which step handler
     speech?: string;           // Twilio SpeechResult
     confidence?: number;       // Twilio Confidence

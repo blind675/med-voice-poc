@@ -1,5 +1,5 @@
 export type TurnLog = {
-    ts: string;
+    ts?: string;
     state: string;
     speech?: string;
     confidence?: number;
