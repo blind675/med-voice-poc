@@ -7,12 +7,12 @@ exports.sendSessionEmail = sendSessionEmail;
 const form_data_1 = __importDefault(require("form-data"));
 const mailgun_js_1 = __importDefault(require("mailgun.js"));
 const mailgun = new mailgun_js_1.default(form_data_1.default);
-const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY || "MAILGUN_API_KEY_REDACTED";
-const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || "greenscope.ro";
-const TO_EMAIL = process.env.TO_EMAIL || "catalin.bora@gmail.com";
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY;
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN;
+const TO_EMAIL = process.env.TO_EMAIL;
 const mg = mailgun.client({
     username: "api",
-    key: MAILGUN_API_KEY
+    key: MAILGUN_API_KEY || ""
 });
 async function sendSessionEmail(session) {
     const subject = `Canapea - Comanda noua - ${session.from || "Numar necunoscut"}`;
@@ -53,9 +53,9 @@ ${session.turns.map(t => `[${t.ts}] ${t.state}: ${t.speech || t.note || ""}`).jo
 ${session.turns.map(t => `<li>[${t.ts}] <strong>${t.state}:</strong> ${t.speech || t.note || ""}</li>`).join("\n")}
 </ul>
 `.trim();
-    await mg.messages.create(MAILGUN_DOMAIN, {
-        from: `Canapele Voice POC <voice-poc@${MAILGUN_DOMAIN}>`,
-        to: [TO_EMAIL],
+    await mg.messages.create(MAILGUN_DOMAIN || "", {
+        from: `Canapele Voice POC <voice-poc@${MAILGUN_DOMAIN || ""}>`,
+        to: [TO_EMAIL || ""],
         subject,
         text,
         html
