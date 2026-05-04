@@ -47,7 +47,7 @@ app.post("/voice", (req, res) => {
 
     vr.say(
         { language: "ro-RO", voice: "Google.ro-RO-Wavenet-B", },
-        "Bună! Ați sunat la un numar special. Acest apel este gestionat de un asistent A.I. si nu este o linie pentru urgențe medicale. Gaby e foarte draguta. La ce ora ne trezim maine?"
+        "Bună! Ați sunat la un numar special. Acest apel este gestionat de un asistent A.I. si nu este o linie pentru urgențe medicale. Va rog să-mi spuneți numele dumneavoastră."
     );
 
     // If nothing is captured, Twilio will hit /step/consent with empty SpeechResult because of actionOnEmptyResult
