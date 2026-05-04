@@ -1,0 +1,88 @@
+{
+  "callSid": "CA988d3db02c7a2eeb194b99f98eef53eb",
+  "from": "+40745071490",
+  "to": "+40373800543",
+  "createdAt": "2025-08-27T20:33:50.984Z",
+  "lastUpdatedAt": "2025-08-27T20:36:16.820Z",
+  "data": {
+    "name": "Andrei Bora",
+    "email": "Cătălin Bora rond gmail.com",
+    "reason": "mă doare spatele foarte tare în partea de jos",
+    "dateText": "27 august",
+    "timeWindowText": "aș vrea de la 12:30"
+  },
+  "turns": [
+    {
+      "state": "consent",
+      "speech": "da",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:34:09.700Z"
+    },
+    {
+      "state": "name",
+      "speech": "Andrei Bora",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:34:16.765Z"
+    },
+    {
+      "state": "name_confirm",
+      "speech": "da da",
+      "ts": "2025-08-27T20:34:26.058Z"
+    },
+    {
+      "state": "email",
+      "speech": "Cătălin Bora rond gmail.com",
+      "confidence": 0.9130683,
+      "ts": "2025-08-27T20:34:40.479Z"
+    },
+    {
+      "state": "email_confirm",
+      "speech": "nu este corect",
+      "ts": "2025-08-27T20:34:57.163Z"
+    },
+    {
+      "state": "reason",
+      "speech": "mă doare spatele și vreau",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:35:07.771Z"
+    },
+    {
+      "state": "reason_confirm",
+      "speech": "mă doare",
+      "ts": "2025-08-27T20:35:13.116Z"
+    },
+    {
+      "state": "reason",
+      "speech": "mă doare spatele foarte tare în partea de jos",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:35:21.638Z"
+    },
+    {
+      "state": "reason_confirm",
+      "speech": "este corect",
+      "ts": "2025-08-27T20:35:37.576Z"
+    },
+    {
+      "state": "date",
+      "speech": "27 august",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:35:49.049Z"
+    },
+    {
+      "state": "date_confirm",
+      "speech": "da este corect",
+      "ts": "2025-08-27T20:35:56.742Z"
+    },
+    {
+      "state": "time_window",
+      "speech": "aș vrea de la 12:30",
+      "confidence": 0.91882896,
+      "ts": "2025-08-27T20:36:09.516Z"
+    },
+    {
+      "state": "time_window_confirm",
+      "speech": "da",
+      "ts": "2025-08-27T20:36:16.818Z"
+    }
+  ]
+}
