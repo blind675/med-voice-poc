@@ -10,6 +10,7 @@ exports.getSession = getSession;
 const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
 const slugify_1 = __importDefault(require("slugify"));
+const mailgun_1 = require("../util/mailgun");
 const BASE_DIR = path_1.default.join(process.cwd(), "data", "calls");
 async function ensureDir(dir) {
     await fs_1.promises.mkdir(dir, { recursive: true });
@@ -52,6 +53,20 @@ async function appendTurn(callSid, turn) {
 async function setData(callSid, patch) {
     const sess = await initSession(callSid);
     sess.data = { ...sess.data, ...patch };
+    // If session is confirmed, send email and skip file storage
+    if (patch.confirmed === true) {
+        const sessionData = {
+            callSid: sess.callSid,
+            from: sess.from,
+            to: sess.to,
+            createdAt: sess.createdAt,
+            orderDetails: sess.data.orderDetails,
+            customerAndDeliveryDetails: sess.data.customerAndDeliveryDetails,
+            turns: sess.turns
+        };
+        await (0, mailgun_1.sendSessionEmail)(sessionData);
+        return;
+    }
     await writeSession(sess);
 }
 async function getSession(callSid) {

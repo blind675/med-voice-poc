@@ -3,24 +3,49 @@ import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import { twiml } from "twilio";
 import { appendTurn, initSession, setData, getSession } from "./storage/logger";
-import { normalizeRomanianEmailSpoken, looksLikeEmail } from "./util/roEmail";
 
 dotenv.config();
+
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(bodyParser.urlencoded({ extended: false }));
 
-const SAY = (vr: twiml.VoiceResponse, text: string) =>
-    vr.say({ language: "ro-RO" }, text);
+const PROMPTS = {
+    introOrder:
+        "Bună! Ați sunat la centrul de comenzi pentru fabrica de canapele. Acest apel este gestionat de un asistent AI. Vă pot ajuta să înregistrați o cerere de comandă pentru o canapea. Vă rog să îmi spuneți ce doriți să comandați: tipul canapelei, dimensiunea aproximativă, culoarea sau materialul dorit și cantitatea.",
 
-const GATHER = (
+    customerDelivery:
+        "Mulțumesc. Acum vă rog să îmi spuneți numele dumneavoastră, localitatea pentru livrare și dacă aveți un termen preferat de livrare.",
+
+    fallbackOrder:
+        "Nu am înțeles detaliile comenzii. Vă rog să repetați ce canapea doriți să comandați, inclusiv tipul, dimensiunea, culoarea sau materialul și cantitatea.",
+
+    fallbackCustomerDelivery:
+        "Nu am înțeles detaliile pentru client și livrare. Vă rog să repetați numele dumneavoastră, localitatea pentru livrare și termenul preferat.",
+
+    finalSuffix:
+        "Un consultant vă va suna pentru confirmarea detaliilor, estimarea prețului și termenul final de producție. Vă mulțumim și o zi bună!"
+};
+
+const say = (vr: twiml.VoiceResponse, text: string) => {
+    vr.say({ language: "ro-RO" }, text);
+};
+
+interface GatherOptions {
+    speechTimeout?: string;
+    actionOnEmptyResult?: boolean;
+    numDigits?: number;
+    finishOnKey?: string;
+}
+
+const gather = (
     vr: twiml.VoiceResponse,
     action: string,
     prompt: string,
-    opts?: Partial<Parameters<twiml.VoiceResponse["gather"]>[0]>
+    opts?: Partial<GatherOptions>
 ) => {
-    const gather = vr.gather({
+    const g = vr.gather({
         input: ["speech"],
         language: "ro-RO",
         action,
@@ -29,279 +54,124 @@ const GATHER = (
         actionOnEmptyResult: true,
         ...opts
     });
-    gather.say({ language: "ro-RO" }, prompt);
+
+    g.say({ language: "ro-RO" }, prompt);
 };
 
-// Health
-app.get("/health", (_req, res) => res.status(200).send("ok"));
+function cleanSpeech(value: unknown): string {
+    return String(value || "").trim();
+}
 
-// Entry point
+function getConfidence(value: unknown): number {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Health check
+app.get("/health", (_req, res) => {
+    res.status(200).send("ok");
+});
+
+/**
+ * STEP 1
+ * Incoming call → ask for sofa order details.
+ */
 app.post("/voice", async (req, res) => {
     const { CallSid, From, To } = req.body || {};
-    await initSession(CallSid, From, To);
-    const vr = new twiml.VoiceResponse();
-    vr.say(
-        { language: "ro-RO", voice: "Google.ro-RO-Wavenet-B" },
-        "Bună! Ați sunat la un numar special. Acest apel este gestionat de un asistent A.I. si nu este o linie pentru urgențe medicale. Va rog să-mi spuneți numele dumneavoastră."
-    );
 
-    vr.gather({
-        input: ["speech"],
-        action: "/step/name",
-        method: "POST",
-        language: "ro-RO",
-        speechTimeout: "auto",
-        actionOnEmptyResult: true
+    await initSession(CallSid, From, To);
+    await setData(CallSid, {
+        callerPhone: From
+    } as any);
+
+    await appendTurn(CallSid, {
+        state: "call_started",
+        note: `Incoming call from ${From || "unknown"} to ${To || "unknown"}`
     });
 
+    const vr = new twiml.VoiceResponse();
+
+    gather(vr, "/step/order_details", PROMPTS.introOrder);
+
     res.type("text/xml").send(vr.toString());
 });
 
-// Consent
-app.post("/step/consent", async (req, res) => {
+/**
+ * STEP 2
+ * Store sofa order details → ask for customer + delivery details.
+ */
+app.post("/step/order_details", async (req, res) => {
     const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const said = saidRaw.toLowerCase();
-    const conf = Number(req.body.Confidence || 0);
+    const speech = cleanSpeech(req.body.SpeechResult);
+    const confidence = getConfidence(req.body.Confidence);
 
-    await appendTurn(CallSid, { state: "consent", speech: saidRaw, confidence: conf });
-
-    const yesWords = ["da", "ok", "sigur", "continua", "continuă", "desigur", "bine"];
-    const noWords = ["nu", "nu vreau", "nu doresc", "inchide", "închide"];
-
-    const isYes = yesWords.some(w => said.includes(w));
-    const isNo = noWords.some(w => said.includes(w));
+    await appendTurn(CallSid, {
+        state: "order_details",
+        speech,
+        confidence
+    });
 
     const vr = new twiml.VoiceResponse();
 
-    if (isNo) {
-        SAY(vr, "Am înțeles. O zi bună!");
-        vr.hangup();
-        return res.type("text/xml").send(vr.toString());
-    }
-    if (!isYes) {
-        GATHER(vr, "/step/consent", "Nu am înțeles. Doriți să continuăm?");
+    if (!speech || speech.length < 3) {
+        gather(vr, "/step/order_details", PROMPTS.fallbackOrder);
         return res.type("text/xml").send(vr.toString());
     }
 
-    // Next: Name
-    GATHER(vr, "/step/name", "Mulțumesc. Care este numele complet?");
+    await setData(CallSid, {
+        orderDetails: speech
+    } as any);
+
+    gather(vr, "/step/customer_delivery", PROMPTS.customerDelivery);
+
     res.type("text/xml").send(vr.toString());
 });
 
-// Name → confirm
-app.post("/step/name", async (req, res) => {
+/**
+ * STEP 3
+ * Store customer + delivery details → read summary → hang up.
+ */
+app.post("/step/customer_delivery", async (req, res) => {
     const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const conf = Number(req.body.Confidence || 0);
-    await appendTurn(CallSid, { state: "name", speech: saidRaw, confidence: conf });
+    const speech = cleanSpeech(req.body.SpeechResult);
+    const confidence = getConfidence(req.body.Confidence);
+
+    await appendTurn(CallSid, {
+        state: "customer_delivery",
+        speech,
+        confidence
+    });
 
     const vr = new twiml.VoiceResponse();
-    GATHER(vr, "/step/name_confirm", `Am înțeles: ${saidRaw}. Este corect?`);
-    res.type("text/xml").send(vr.toString());
-});
 
-app.post("/step/name_confirm", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const said = (req.body.SpeechResult || "").trim().toLowerCase();
-    await appendTurn(CallSid, { state: "name_confirm", speech: said });
-
-    const yes = ["da", "corect", "este corect", "așa este"].some(w => said.includes(w));
-    const vr = new twiml.VoiceResponse();
-
-    if (!yes) {
-        GATHER(vr, "/step/name", "Vă rog repetați numele complet.");
+    if (!speech || speech.length < 3) {
+        gather(vr, "/step/customer_delivery", PROMPTS.fallbackCustomerDelivery);
         return res.type("text/xml").send(vr.toString());
     }
 
-    // Persist confirmed name (use the last name turn to fetch original)
-    const sess = await getSession(CallSid);
-    const lastNameTurn = [...sess.turns].reverse().find(t => t.state === "name");
-    const nameText = lastNameTurn?.speech || "";
-    await setData(CallSid, { name: nameText });
+    await setData(CallSid, {
+        customerAndDeliveryDetails: speech,
+        confirmed: true
+    } as any);
 
-    // Next: optional email
-    GATHER(
+    const session = await getSession(CallSid);
+
+    const orderDetails =
+        (session.data as any).orderDetails || "detalii comandă nespecificate";
+
+    const customerAndDeliveryDetails =
+        speech || "detalii client și livrare nespecificate";
+
+    say(
         vr,
-        "/step/email",
-        "Doriți să primiți invitație pe email? Dacă da, spuneți adresa. Dacă nu, spuneți 'nu'."
+        `Am înregistrat cererea dumneavoastră. Pe scurt, doriți: ${orderDetails}. Datele pentru client și livrare sunt: ${customerAndDeliveryDetails}. ${PROMPTS.finalSuffix}`
     );
-    res.type("text/xml").send(vr.toString());
-});
 
-// Email (optional) → confirm or skip
-app.post("/step/email", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const conf = Number(req.body.Confidence || 0);
-    await appendTurn(CallSid, { state: "email", speech: saidRaw, confidence: conf });
-
-    const said = saidRaw.toLowerCase();
-    const vr = new twiml.VoiceResponse();
-
-    if (["nu", "nu vreau", "nu doresc"].some(w => said.includes(w))) {
-        // skip email
-        GATHER(vr, "/step/reason", "Am înțeles. Care este motivul vizitei?");
-        return res.type("text/xml").send(vr.toString());
-    }
-
-    const normalized = normalizeRomanianEmailSpoken(saidRaw);
-    const maybe = looksLikeEmail(normalized) ? normalized : saidRaw;
-
-    GATHER(vr, "/step/email_confirm", `Am înțeles: ${maybe}. Este corect?`);
-    res.type("text/xml").send(vr.toString());
-});
-
-app.post("/step/email_confirm", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const said = (req.body.SpeechResult || "").trim().toLowerCase();
-    await appendTurn(CallSid, { state: "email_confirm", speech: said });
-
-    const yes = ["da", "corect", "este corect", "așa este"].some(w => said.includes(w));
-    const vr = new twiml.VoiceResponse();
-
-    if (!yes) {
-        GATHER(vr, "/step/email", "Vă rog repetați adresa de email sau spuneți 'nu' pentru a sări peste.");
-        return res.type("text/xml").send(vr.toString());
-    }
-
-    // Save normalized email (from prior turn)
-    // We re-derive it from the previous email turn for safety.
-    const sess = await getSession(CallSid);
-    const lastEmailTurn = [...sess.turns].reverse().find(t => t.state === "email");
-    const orig = lastEmailTurn?.speech || "";
-    const normalized = normalizeRomanianEmailSpoken(orig);
-    await setData(CallSid, { email: looksLikeEmail(normalized) ? normalized : orig });
-
-    // Next: reason
-    GATHER(vr, "/step/reason", "Mulțumesc. Care este motivul vizitei?");
-    res.type("text/xml").send(vr.toString());
-});
-
-// Reason → confirm (keeps it simple)
-app.post("/step/reason", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const conf = Number(req.body.Confidence || 0);
-    await appendTurn(CallSid, { state: "reason", speech: saidRaw, confidence: conf });
-
-    const vr = new twiml.VoiceResponse();
-    GATHER(vr, "/step/reason_confirm", `Am înțeles: ${saidRaw}. Este corect?`);
-    res.type("text/xml").send(vr.toString());
-});
-
-app.post("/step/reason_confirm", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const said = (req.body.SpeechResult || "").trim().toLowerCase();
-    await appendTurn(CallSid, { state: "reason_confirm", speech: said });
-
-    const yes = ["da", "corect", "este corect", "așa este"].some(w => said.includes(w));
-    const vr = new twiml.VoiceResponse();
-
-    if (!yes) {
-        GATHER(vr, "/step/reason", "Vă rog repetați pe scurt motivul vizitei.");
-        return res.type("text/xml").send(vr.toString());
-    }
-
-    // Save reason
-    const sess = await getSession(CallSid);
-    const lastTurn = [...sess.turns].reverse().find(t => t.state === "reason");
-    await setData(CallSid, { reason: lastTurn?.speech || "" });
-
-    // Next: date
-    GATHER(
-        vr,
-        "/step/date",
-        "În ce zi preferați programarea? De exemplu, 'joi' sau '25 august'."
-    );
-    res.type("text/xml").send(vr.toString());
-});
-
-// Date (text only for now) → confirm
-app.post("/step/date", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const conf = Number(req.body.Confidence || 0);
-    await appendTurn(CallSid, { state: "date", speech: saidRaw, confidence: conf });
-
-    const vr = new twiml.VoiceResponse();
-    GATHER(vr, "/step/date_confirm", `Ați spus: ${saidRaw}. Este corect?`);
-    res.type("text/xml").send(vr.toString());
-});
-
-app.post("/step/date_confirm", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const said = (req.body.SpeechResult || "").trim().toLowerCase();
-    await appendTurn(CallSid, { state: "date_confirm", speech: said });
-
-    const yes = ["da", "corect", "este corect", "așa este"].some(w => said.includes(w));
-    const vr = new twiml.VoiceResponse();
-
-    if (!yes) {
-        GATHER(vr, "/step/date", "Vă rog repetați ziua preferată.");
-        return res.type("text/xml").send(vr.toString());
-    }
-
-    // Save raw date text (we'll parse later)
-    const sess = await getSession(CallSid);
-    const lastTurn = [...sess.turns].reverse().find(t => t.state === "date");
-    await setData(CallSid, { dateText: lastTurn?.speech || "" });
-
-    // Next: time window
-    GATHER(
-        vr,
-        "/step/time_window",
-        "Ce interval orar preferați? De exemplu, 'între 10 și 14' sau 'după 16'."
-    );
-    res.type("text/xml").send(vr.toString());
-});
-
-// Time window → confirm
-app.post("/step/time_window", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const saidRaw = (req.body.SpeechResult || "").trim();
-    const conf = Number(req.body.Confidence || 0);
-    await appendTurn(CallSid, { state: "time_window", speech: saidRaw, confidence: conf });
-
-    const vr = new twiml.VoiceResponse();
-    GATHER(vr, "/step/time_window_confirm", `Ați spus: ${saidRaw}. Este corect?`);
-    res.type("text/xml").send(vr.toString());
-});
-
-app.post("/step/time_window_confirm", async (req, res) => {
-    const { CallSid } = req.body || {};
-    const said = (req.body.SpeechResult || "").trim().toLowerCase();
-    await appendTurn(CallSid, { state: "time_window_confirm", speech: said });
-
-    const yes = ["da", "corect", "este corect", "așa este"].some(w => said.includes(w));
-    const vr = new twiml.VoiceResponse();
-
-    if (!yes) {
-        GATHER(vr, "/step/time_window", "Vă rog repetați intervalul orar preferat.");
-        return res.type("text/xml").send(vr.toString());
-    }
-
-    // Save raw time window text
-    const sess = await getSession(CallSid);
-    const lastTurn = [...sess.turns].reverse().find(t => t.state === "time_window");
-    await setData(CallSid, { timeWindowText: lastTurn?.speech || "" });
-
-    // Summary (placeholder; slot search + booking in later steps)
-    const s = await getSession(CallSid);
-    const name = s.data.name || "nespecificat";
-    const email = s.data.email ? `, email ${s.data.email}` : "";
-    const reason = s.data.reason || "nespecificat";
-    const dateText = s.data.dateText || "nespecificat";
-    const twText = s.data.timeWindowText || "nespecificat";
-
-    SAY(
-        vr,
-        `Mulțumesc. Am notat: ${name}${email}. Motivul vizitei: ${reason}. Ziua: ${dateText}. Intervalul orar: ${twText}. În pasul următor vom verifica disponibilitatea și vom propune două variante.`
-    );
     vr.hangup();
+
     res.type("text/xml").send(vr.toString());
 });
 
 app.listen(port, () => {
-    console.log(`Voice POC listening on :${port}`);
+    console.log(`Sofa order voice POC listening on :${port}`);
 });

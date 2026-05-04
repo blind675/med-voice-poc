@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import slugify from "slugify";
+import { sendSessionEmail, SessionData } from "../util/mailgun";
 
 const BASE_DIR = path.join(process.cwd(), "data", "calls");
 
@@ -74,6 +75,23 @@ export async function appendTurn(callSid: string, turn: TurnLog) {
 export async function setData(callSid: string, patch: Partial<SessionLog["data"]>) {
     const sess = await initSession(callSid);
     sess.data = { ...sess.data, ...patch };
+
+    // If session is confirmed, send email and skip file storage
+    if ((patch as any).confirmed === true) {
+        const sessionData: SessionData = {
+            callSid: sess.callSid,
+            from: sess.from,
+            to: sess.to,
+            createdAt: sess.createdAt,
+            orderDetails: (sess.data as any).orderDetails,
+            customerAndDeliveryDetails: (sess.data as any).customerAndDeliveryDetails,
+            turns: sess.turns
+        };
+
+        await sendSessionEmail(sessionData);
+        return;
+    }
+
     await writeSession(sess);
 }
 
